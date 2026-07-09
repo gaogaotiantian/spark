@@ -4778,10 +4778,22 @@ def invoke_udf(message_receiver: SparkMessageReceiver, outfile: BinaryIO):
             serializer._flush_per_batch = True
         run_process = pipelined_process if is_pipelined else process
 
+        sampling_profiler_enabled = runner_conf.udf_profiler == "sampling"
+
         processing_start_time = time.time()
         with capture_outputs():
             if profiler:
                 profiler.profile(run_process)
+            elif sampling_profiler_enabled:
+                from pyspark.sql.profiler import WorkerSamplingProfiler, ProfileResultsParamV2
+
+                accumulator = _deserialize_accumulator(
+                    SpecialAccumulatorIds.SQL_UDF_PROFIER_V2, {}, ProfileResultsParamV2
+                )
+
+                with WorkerSamplingProfiler(sampling_interval=0.1) as profiler:
+                    run_process()
+                profiler.save(accumulator)
             else:
                 run_process()
         processing_time_ms = int(1000 * (time.time() - processing_start_time))
